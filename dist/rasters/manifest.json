@@ -1,0 +1,29 @@
+{
+  "dir": "rasters",
+  "items": [
+    {
+      "file": "final_agglomerate_2018_20180820_Biodiv_β0.6_γ0.3 (3).tif"
+    },
+    {
+      "file": "final_agglomerate_2019_20190601_Biodiv_β0.6_γ0.3.tif"
+    },
+    {
+      "file": "final_agglomerate_2020_08_20200801_Biodiv_β0.6_γ0.3.tif"
+    },
+    {
+      "file": "final_agglomerate_2020_09_20200905_Biodiv_β0.6_γ0.3.tif"
+    },
+    {
+      "file": "final_agglomerate_2021_06_20210610_Biodiv_β0.6_γ0.3.tif"
+    },
+    {
+      "file": "final_agglomerate_2021_07_20210629_Biodiv_β0.6_γ0.3.tif"
+    },
+    {
+      "file": "final_agglomerate_2023_06_20230610_Biodiv_β0.6_γ0.3.tif"
+    },
+    {
+      "file": "final_agglomerate_2024_06_20240601_Biodiv_β0.6_γ0.3.tif"
+    }
+  ]
+}

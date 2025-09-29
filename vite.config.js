@@ -3,6 +3,33 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+function listDirectories(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter(ent => ent.isDirectory())
+    .map(ent => ent.name)
+    .sort();
+}
+
+function listFilesRecursive(dir, exts) {
+  const out = [];
+  function walk(d, relBase = '') {
+    const entries = fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }) : [];
+    for (const ent of entries) {
+      const abs = path.join(d, ent.name);
+      const rel = path.join(relBase, ent.name);
+      if (ent.isDirectory()) {
+        walk(abs, rel);
+      } else {
+        const ext = path.extname(ent.name).toLowerCase();
+        if (exts.includes(ext)) out.push(rel);
+      }
+    }
+  }
+  walk(dir);
+  return out.sort();
+}
+
 export default defineConfig({
   server: {
     port: 5173,
@@ -24,33 +51,6 @@ export default defineConfig({
           const safe = path.resolve(base, rel || '');
           if (!safe.startsWith(base)) throw new Error('Invalid path');
           return safe;
-        }
-
-        function listDirectories(dir) {
-          if (!fs.existsSync(dir)) return [];
-          return fs.readdirSync(dir, { withFileTypes: true })
-            .filter(ent => ent.isDirectory())
-            .map(ent => ent.name)
-            .sort();
-        }
-
-        function listFilesRecursive(dir, exts) {
-          const out = [];
-          function walk(d, relBase = '') {
-            const entries = fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }) : [];
-            for (const ent of entries) {
-              const abs = path.join(d, ent.name);
-              const rel = path.join(relBase, ent.name);
-              if (ent.isDirectory()) {
-                walk(abs, rel);
-              } else {
-                const ext = path.extname(ent.name).toLowerCase();
-                if (exts.includes(ext)) out.push(rel);
-              }
-            }
-          }
-          walk(dir);
-          return out.sort();
         }
 
         // List rasters: /api/rasters?dir=<folder>
@@ -172,6 +172,12 @@ export default defineConfig({
           if (fs.existsSync(src)) {
             fs.cpSync(src, dest, { recursive: true });
           }
+          const manifestFiles = listFilesRecursive(dest, ['.tif', '.tiff']);
+          const manifest = {
+            dir: 'rasters',
+            items: manifestFiles.map(file => ({ file }))
+          };
+          fs.writeFileSync(path.join(dest, 'manifest.json'), JSON.stringify(manifest, null, 2));
         } catch { /* ignore */ }
 
         try {

@@ -745,17 +745,27 @@ function computeGeoReference(image) {
 }
 
 async function loadRasterList() {
-  const params = new URLSearchParams();
-  if (RASTER_DIR) params.set('dir', RASTER_DIR);
-  const res = await fetch(`/api/rasters?${params.toString()}`);
-  if (!res.ok) throw new Error('Failed to list rasters');
-  const json = await res.json();
-  rasters = json.items.map(it => {
+  let json;
+  if (import.meta.env.PROD) {
+    const res = await fetch('/rasters/manifest.json');
+    if (!res.ok) throw new Error('Failed to load raster manifest');
+    json = await res.json();
+  } else {
+    const params = new URLSearchParams();
+    if (RASTER_DIR) params.set('dir', RASTER_DIR);
+    const res = await fetch(`/api/rasters?${params.toString()}`);
+    if (!res.ok) throw new Error('Failed to list rasters');
+    json = await res.json();
+  }
+
+  const baseDir = json?.dir || (import.meta.env.PROD ? 'rasters' : undefined);
+  const items = Array.isArray(json?.items) ? json.items : [];
+  rasters = items.map(it => {
     const isoDate = extractIsoDate(it.file);
     return {
       label: formatRasterLabel(it.file),
       file: it.file,
-      dir: json.dir,
+      dir: baseDir,
       isoDate,
       displayDate: formatDisplayDate(isoDate)
     };
