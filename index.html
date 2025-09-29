@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SILA Mini Viewer</title>
+  <!-- Leaflet CSS is bundled via ES module import in main.js -->
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+      :root {
+        --accent: #2a6fdb;
+        --accent-soft: rgba(42, 111, 219, 0.12);
+        --border: #e3e6ec;
+        --text: #1f2933;
+        --text-muted: #616e7c;
+        --surface: rgba(255, 255, 255, 0.94);
+      }
+
+      html, body, #app { height: 100%; margin: 0; }
+      body {
+        font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--text);
+        background: linear-gradient(135deg, #eef2f7, #f8fbff);
+      }
+
+      #map { height: 100%; }
+
+      button, select, input {
+        font-family: inherit;
+      }
+
+      .toggle-btn {
+        position: absolute;
+        top: 18px;
+        z-index: 1100;
+        padding: 10px 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(42, 111, 219, 0.2);
+        background: #fff;
+        color: var(--accent);
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        box-shadow: 0 18px 40px rgba(42, 111, 219, 0.12);
+        cursor: pointer;
+        transition: transform 160ms ease, box-shadow 160ms ease;
+      }
+      .toggle-btn:hover { transform: translateY(-1px); box-shadow: 0 16px 32px rgba(42,111,219,0.18); }
+      .toggle-btn:active { transform: translateY(0); box-shadow: 0 10px 20px rgba(42,111,219,0.15); }
+
+      #toggleSidebar {
+        left: 80px;
+      }
+      #toggleAreas {
+        left: 200px;
+      }
+
+      .sidebar {
+        position: absolute;
+        top: 0; left: 0;
+        width: 320px; height: 100%;
+        background: var(--surface);
+        backdrop-filter: blur(16px);
+        border-right: 1px solid rgba(255,255,255,0.6);
+        box-shadow: 0 28px 60px rgba(15, 23, 42, 0.18);
+        transform: translateX(-100%);
+        transition: transform 220ms ease-in-out;
+        z-index: 2000;
+        display: flex; flex-direction: column;
+      }
+      .sidebar.open { transform: translateX(0); }
+
+      .sidebar-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 22px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .sidebar-header strong {
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      #closeSidebar {
+        border: none;
+        background: transparent;
+        font-size: 18px;
+        cursor: pointer;
+        color: var(--text-muted);
+        transition: color 120ms ease;
+      }
+      #closeSidebar:hover { color: var(--accent); }
+
+      .sidebar-content {
+        padding: 18px 22px;
+        overflow-y: auto;
+        gap: 16px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .legend-block {
+        padding: 14px 16px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255,255,255,0.9);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+      }
+      .legend-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+      .legend-controls label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+      #rampSelect {
+        flex: 1;
+        width: 100%;
+        border-radius: 999px;
+        padding: 6px 10px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.85);
+        box-sizing: border-box;
+      }
+      .legend-canvas { width: 100%; height: 12px; display: block; border-radius: 999px; border: 1px solid var(--border); }
+      .legend-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 6px; letter-spacing: 0.02em; }
+
+      .smooth-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--text-muted);
+        font-weight: 500;
+      }
+      .smooth-toggle input { accent-color: var(--accent); }
+
+      .raster-item {
+        padding: 12px 14px 14px;
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.9);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .raster-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 13px;
+        line-height: 1.3;
+      }
+      .raster-info { display: inline-flex; align-items: center; gap: 8px; }
+      .raster-header label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        color: var(--text);
+        font-weight: 600;
+      }
+      .raster-header input[type="checkbox"] {
+        accent-color: var(--accent);
+        width: 16px; height: 16px;
+      }
+      .raster-header button {
+        border-radius: 999px;
+        border: 1px solid rgba(42,111,219,0.3);
+        background: rgba(42,111,219,0.08);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 600;
+        padding: 5px 12px;
+        cursor: pointer;
+        transition: background 120ms ease;
+      }
+      .raster-header button:hover {
+        background: rgba(42,111,219,0.18);
+      }
+
+      .raster-controls { display: flex; flex-direction: column; gap: 6px; }
+      .opacity { width: 100%; }
+      .opacity input[type="range"] { width: 100%; }
+
+      input[type="range"] {
+        -webkit-appearance: none;
+        height: 6px;
+        background: rgba(42,111,219,0.18);
+        border-radius: 999px;
+        outline: none;
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 16px; height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        border: 2px solid var(--accent);
+        box-shadow: 0 6px 12px rgba(42,111,219,0.25);
+        cursor: pointer;
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 16px; height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        border: 2px solid var(--accent);
+        box-shadow: 0 6px 12px rgba(42,111,219,0.25);
+        cursor: pointer;
+      }
+
+      .legend { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+      .status-error { color: #d12e50; font-size: 12px; margin-top: 4px; }
+
+      /* Sharpen raster appearance by disabling interpolation on overlays */
+      .leaflet-image-layer.pixelated { image-rendering: pixelated; image-rendering: crisp-edges; }
+      .leaflet-image-layer.smooth { image-rendering: auto; }
+      /* Reduce visible seams between tiles */
+      .leaflet-tile { outline: 1px solid rgba(0,0,0,0); }
+
+      #loadingOverlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 180ms ease;
+        z-index: 2500;
+        background: rgba(255, 255, 255, 0.12);
+        backdrop-filter: blur(3px);
+      }
+      #loadingOverlay.visible {
+        opacity: 1;
+      }
+      .spinner {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        border: 5px solid rgba(42,111,219,0.15);
+        border-top-color: var(--accent);
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      .brand-logo {
+        position: absolute;
+        top: 24px;
+        right: 24px;
+        z-index: 1200;
+        width: 400px;
+        pointer-events: none;
+        transition: opacity 180ms ease, transform 180ms ease;
+        opacity: 1;
+        filter: drop-shadow(0 12px 28px rgba(15,23,42,0.28));
+      }
+      .brand-logo.overlay-active { opacity: 1; }
+
+      .areas-panel {
+        position: absolute;
+        top: 0; left: 0;
+        width: 288px; height: 100%;
+        background: var(--surface);
+        backdrop-filter: blur(16px);
+        border-right: 1px solid rgba(255,255,255,0.6);
+        box-shadow: 0 28px 60px rgba(15, 23, 42, 0.18);
+        transform: translateX(-100%);
+        transition: transform 220ms ease-in-out;
+        z-index: 1900;
+        display: flex;
+        flex-direction: column;
+      }
+      .areas-panel.open { transform: translateX(0); }
+      .areas-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 22px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .areas-header strong {
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      #closeAreas {
+        border: none;
+        background: transparent;
+        font-size: 18px;
+        cursor: pointer;
+        color: var(--text-muted);
+        transition: color 120ms ease;
+      }
+      #closeAreas:hover { color: var(--accent); }
+      .areas-content {
+        padding: 18px 22px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .areas-option {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.9);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+        cursor: pointer;
+        transition: border-color 120ms ease, box-shadow 120ms ease;
+      }
+      .areas-option:hover {
+        border-color: rgba(42,111,219,0.4);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+      }
+      .areas-option input[type="radio"] {
+        accent-color: var(--accent);
+        margin-top: 2px;
+      }
+      .areas-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .areas-meta strong { font-size: 14px; font-weight: 600; }
+      .areas-meta span { font-size: 12px; color: var(--text-muted); }
+    </style>
+  </head>
+  <body>
+    <button id="toggleSidebar" class="toggle-btn">Layers ▤</button>
+    <button id="toggleAreas" class="toggle-btn">Areas ▤</button>
+    <div id="app">
+      <div id="areasPanel" class="areas-panel">
+        <div class="areas-header">
+          <strong>Research Areas</strong>
+          <button id="closeAreas">✕</button>
+        </div>
+        <div id="areasList" class="areas-content"></div>
+      </div>
+      <div id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+          <strong>Biodiversity Layers</strong>
+          <button id="closeSidebar">✕</button>
+        </div>
+        <div class="sidebar-content">
+          <div style="margin-bottom:8px;">
+            <label class="smooth-toggle">
+              <input type="checkbox" id="smoothToggle" /> Smooth (anti-aliased)
+            </label>
+          </div>
+          <div id="legend" class="legend-block">
+            <div class="legend-controls">
+              <label for="rampSelect"><strong>Legend</strong> (0 → 1):</label>
+              <select id="rampSelect">
+                <option value="grayscale">Grayscale (0=black → 1=white)</option>
+                <option value="viridis">Viridis</option>
+                <option value="magma">Magma</option>
+                <option value="heat">Heat</option>
+              </select>
+            </div>
+            <canvas id="legendCanvas" class="legend-canvas" width="240" height="12"></canvas>
+            <div class="legend-labels">
+              <span>0</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1</span>
+            </div>
+          </div>
+          <div id="layers"></div>
+        </div>
+      </div>
+      <div id="map"></div>
+    </div>
+    <div id="loadingOverlay"><div class="spinner"></div></div>
+    <img id="brandLogo" class="brand-logo hidden" src="/logo.png" alt="Brand logo" />
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
