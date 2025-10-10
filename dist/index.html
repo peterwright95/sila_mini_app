@@ -342,6 +342,59 @@
         gap: 12px;
       }
 
+      .areas-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.9);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+      }
+
+      .areas-controls strong { font-size: 14px; font-weight: 600; }
+
+      .areas-controls p {
+        margin: 0;
+        font-size: 12px;
+        color: var(--text-muted);
+        line-height: 1.35;
+      }
+
+      .areas-controls .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .areas-controls button {
+        border-radius: 999px;
+        border: 1px solid rgba(42,111,219,0.3);
+        background: rgba(42,111,219,0.08);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 600;
+        padding: 6px 14px;
+        cursor: pointer;
+        transition: background 120ms ease, opacity 120ms ease;
+      }
+
+      .areas-controls button:hover:not(:disabled) {
+        background: rgba(42,111,219,0.18);
+      }
+
+      .areas-controls button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+
+      #areasList {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
       .areas-option {
         display: flex;
         align-items: flex-start;
@@ -369,13 +422,37 @@
         display: flex;
         flex-direction: column;
         gap: 4px;
+        flex: 1;
       }
 
       .areas-meta strong { font-size: 14px; font-weight: 600; }
 
       .areas-meta span { font-size: 12px; color: var(--text-muted); }
+
+      .delete-area-btn {
+        margin-left: auto;
+        border-radius: 999px;
+        border: 1px solid rgba(209,46,80,0.3);
+        background: rgba(209,46,80,0.08);
+        color: #d12e50;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 5px 12px;
+        cursor: pointer;
+        transition: background 120ms ease, opacity 120ms ease;
+        align-self: center;
+      }
+
+      .delete-area-btn:hover {
+        background: rgba(209,46,80,0.18);
+      }
+
+      .delete-area-btn:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(209,46,80,0.35);
+      }
     </style>
-    <script type="module" crossorigin src="/assets/index-BVsRZzKt.js"></script>
+    <script type="module" crossorigin src="/assets/index-BDCNpROf.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-CIGW-MKW.css">
   </head>
   <body>
@@ -387,7 +464,18 @@
           <strong>Research Areas</strong>
           <button id="closeAreas">✕</button>
         </div>
-        <div id="areasList" class="areas-content"></div>
+        <div class="areas-content">
+          <div class="areas-controls">
+            <strong>Draw custom area</strong>
+            <p id="areaDrawHelp">Click the map to add vertices. Double-click to finish a polygon.</p>
+            <div class="actions">
+              <button id="areaDrawStart">Start drawing</button>
+              <button id="areaDrawFinish" disabled>Finish</button>
+              <button id="areaDrawCancel" disabled>Cancel</button>
+            </div>
+          </div>
+          <div id="areasList"></div>
+        </div>
       </div>
       <div id="sidebar" class="sidebar">
         <div class="sidebar-header">

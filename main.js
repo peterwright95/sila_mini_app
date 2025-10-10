@@ -23,6 +23,10 @@ const areaPanelEl = document.getElementById('areasPanel');
 const toggleAreasBtn = document.getElementById('toggleAreas');
 const closeAreasBtn = document.getElementById('closeAreas');
 const areasListEl = document.getElementById('areasList');
+const areaDrawStartBtn = document.getElementById('areaDrawStart');
+const areaDrawFinishBtn = document.getElementById('areaDrawFinish');
+const areaDrawCancelBtn = document.getElementById('areaDrawCancel');
+const areaDrawHelpEl = document.getElementById('areaDrawHelp');
 const areaModules = import.meta.glob('./areas/*.geojson', { eager: true, import: 'default', query: '?raw' });
 const areaDefinitions = Object.entries(areaModules).map(([path, raw]) => {
   let data;
@@ -39,12 +43,30 @@ const areaDefinitions = Object.entries(areaModules).map(([path, raw]) => {
     id,
     label: baseName,
     fileName,
-    data
+    data,
+    isCustom: false
   };
 }).filter(area => area.data && typeof area.data === 'object').sort((a, b) => a.label.localeCompare(b.label));
 const areaDefinitionById = new Map(areaDefinitions.map(area => [area.id, area]));
 const areaLayers = new Map();
+const CUSTOM_AREA_STORAGE_KEY = 'sila_custom_areas_v1';
 let activeAreaId = null;
+let customAreaSequence = 1;
+let currentDrawingArea = null;
+const defaultAreaDrawHelpText = areaDrawHelpEl?.textContent ?? '';
+let areaDrawHelpTimeout = null;
+
+const storedCustomAreas = loadStoredCustomAreas();
+if (Array.isArray(storedCustomAreas) && storedCustomAreas.length) {
+  storedCustomAreas.forEach((area) => {
+    if (!area || !area.id || areaDefinitionById.has(area.id)) return;
+    area.isCustom = true;
+    areaDefinitions.push(area);
+    areaDefinitionById.set(area.id, area);
+  });
+  sortAreaDefinitions();
+  customAreaSequence = Math.max(customAreaSequence, storedCustomAreas.length + 1);
+}
 
 const areaDefaultStyle = {
   color: '#2a6fdb',
@@ -63,6 +85,327 @@ const areaSelectedStyle = {
   fillColor: '#2a6fdb',
   fillOpacity: 0.22
 };
+
+function setAreaDrawHelp(text, { temporary = false, duration = 3200 } = {}) {
+  if (!areaDrawHelpEl) return;
+  if (temporary) {
+    if (areaDrawHelpTimeout) window.clearTimeout(areaDrawHelpTimeout);
+    areaDrawHelpEl.textContent = text;
+    areaDrawHelpTimeout = window.setTimeout(() => {
+      areaDrawHelpEl.textContent = defaultAreaDrawHelpText;
+      areaDrawHelpTimeout = null;
+    }, duration);
+  } else {
+    if (areaDrawHelpTimeout) {
+      window.clearTimeout(areaDrawHelpTimeout);
+      areaDrawHelpTimeout = null;
+    }
+    areaDrawHelpEl.textContent = text;
+  }
+}
+
+function resetAreaDrawHelp() {
+  if (!areaDrawHelpEl) return;
+  setAreaDrawHelp(defaultAreaDrawHelpText);
+}
+
+function sortAreaDefinitions() {
+  areaDefinitions.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function normalizeCustomAreaEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : null;
+  const label = typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : null;
+  const data = entry.data && typeof entry.data === 'object' ? entry.data : null;
+  if (!id || !label || !data) return null;
+  if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) return null;
+  return {
+    id,
+    label,
+    fileName: `${id}.geojson`,
+    data,
+    isCustom: true
+  };
+}
+
+function loadStoredCustomAreas() {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_AREA_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeCustomAreaEntry).filter(Boolean);
+  } catch (err) {
+    console.warn('Failed to load custom areas', err);
+    return [];
+  }
+}
+
+function persistCustomAreas() {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    const payload = areaDefinitions
+      .filter(area => area.isCustom)
+      .map(area => ({
+        id: area.id,
+        label: area.label,
+        data: area.data
+      }));
+    window.localStorage.setItem(CUSTOM_AREA_STORAGE_KEY, JSON.stringify(payload));
+  } catch (err) {
+    console.warn('Failed to save custom areas', err);
+  }
+}
+
+function updateAreaDrawFinishAvailability() {
+  if (!areaDrawFinishBtn) return;
+  if (!currentDrawingArea) {
+    areaDrawFinishBtn.disabled = true;
+    return;
+  }
+  const ready = currentDrawingArea.vertices.length >= 3;
+  areaDrawFinishBtn.disabled = !ready;
+}
+
+function setAreaDrawControlsState(mode) {
+  const active = mode === 'active';
+  if (areaDrawStartBtn) areaDrawStartBtn.disabled = active;
+  if (areaDrawCancelBtn) areaDrawCancelBtn.disabled = !active;
+  if (active) {
+    updateAreaDrawFinishAvailability();
+  } else if (areaDrawFinishBtn) {
+    areaDrawFinishBtn.disabled = true;
+  }
+}
+
+function stopAreaDrawingInteraction({ keepHelp = false } = {}) {
+  if (!currentDrawingArea) {
+    if (!keepHelp) resetAreaDrawHelp();
+    setAreaDrawControlsState('idle');
+    return;
+  }
+  map.off('click', handleDrawingClick);
+  map.off('mousemove', handleDrawingMouseMove);
+  map.off('dblclick', handleDrawingDoubleClick);
+  if (currentDrawingArea.layerGroup) {
+    map.removeLayer(currentDrawingArea.layerGroup);
+  }
+  if (currentDrawingArea.doubleClickZoomWasEnabled && map.doubleClickZoom && map.doubleClickZoom.enable) {
+    map.doubleClickZoom.enable();
+  }
+  map.getContainer().style.cursor = '';
+  currentDrawingArea = null;
+  if (!keepHelp) resetAreaDrawHelp();
+  setAreaDrawControlsState('idle');
+  updateAreaDrawFinishAvailability();
+}
+
+function refreshDrawingPreview(previewLatLng) {
+  if (!currentDrawingArea) return;
+  const previewPoints = currentDrawingArea.vertices.slice();
+  if (previewLatLng && previewPoints.length) {
+    previewPoints.push(previewLatLng);
+  }
+  currentDrawingArea.previewLine.setLatLngs(previewPoints);
+  if (currentDrawingArea.vertices.length >= 3) {
+    currentDrawingArea.polygon.setLatLngs([currentDrawingArea.vertices]);
+  } else {
+    currentDrawingArea.polygon.setLatLngs([]);
+  }
+}
+
+function addDrawingVertex(latlng) {
+  if (!currentDrawingArea) return;
+  currentDrawingArea.vertices.push(latlng);
+  const marker = L.circleMarker(latlng, {
+    radius: 5,
+    color: areaSelectedStyle.color,
+    weight: 2,
+    fillColor: '#fff',
+    fillOpacity: 0.9,
+    interactive: false
+  });
+  currentDrawingArea.layerGroup.addLayer(marker);
+  refreshDrawingPreview(null);
+  updateAreaDrawFinishAvailability();
+}
+
+function handleDrawingClick(event) {
+  if (!currentDrawingArea || !event?.latlng) return;
+  const detail = event.originalEvent?.detail;
+  if (Number.isFinite(detail) && detail > 1) return;
+  addDrawingVertex(event.latlng);
+}
+
+function handleDrawingMouseMove(event) {
+  if (!currentDrawingArea || !event?.latlng) return;
+  if (!currentDrawingArea.vertices.length) return;
+  refreshDrawingPreview(event.latlng);
+}
+
+function handleDrawingDoubleClick(event) {
+  if (!currentDrawingArea) return;
+  if (event?.originalEvent) {
+    L.DomEvent.stop(event.originalEvent);
+  }
+  refreshDrawingPreview(null);
+  finishAreaDrawing();
+}
+
+function startAreaDrawing() {
+  stopAreaDrawingInteraction({ keepHelp: false });
+  const layerGroup = L.layerGroup().addTo(map);
+  const previewLine = L.polyline([], {
+    color: areaSelectedStyle.color,
+    weight: 2,
+    dashArray: '6 6',
+    opacity: 0.85,
+    interactive: false
+  });
+  const polygon = L.polygon([], {
+    color: areaSelectedStyle.color,
+    weight: 2,
+    dashArray: '4 4',
+    fillColor: areaSelectedStyle.fillColor,
+    fillOpacity: 0.18,
+    opacity: 0.9,
+    interactive: false
+  });
+  layerGroup.addLayer(previewLine);
+  layerGroup.addLayer(polygon);
+
+  const doubleClickZoomHandler = map.doubleClickZoom;
+  const doubleClickZoomWasEnabled = !!(doubleClickZoomHandler && doubleClickZoomHandler.enabled());
+  if (doubleClickZoomWasEnabled) {
+    doubleClickZoomHandler.disable();
+  }
+
+  currentDrawingArea = {
+    vertices: [],
+    layerGroup,
+    polygon,
+    previewLine,
+    doubleClickZoomWasEnabled
+  };
+
+  map.on('click', handleDrawingClick);
+  map.on('mousemove', handleDrawingMouseMove);
+  map.on('dblclick', handleDrawingDoubleClick);
+  map.getContainer().style.cursor = 'crosshair';
+
+  setAreaDrawControlsState('active');
+  setAreaDrawHelp('Drawing mode: click to add vertices, double-click or press Finish to save.');
+  updateAreaDrawFinishAvailability();
+}
+
+function generateUniqueAreaId(label) {
+  const base = (label || 'area').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'area';
+  let candidate = base;
+  let suffix = 1;
+  while (areaDefinitionById.has(candidate)) {
+    suffix += 1;
+    candidate = `${base}-${suffix}`;
+  }
+  return candidate;
+}
+
+function finishAreaDrawing() {
+  if (!currentDrawingArea) return;
+  if (currentDrawingArea.vertices.length < 3) {
+    setAreaDrawHelp('Add at least three points to complete the area.', { temporary: true, duration: 3000 });
+    return;
+  }
+
+  const coords = currentDrawingArea.vertices.map((vertex) => [Number(vertex.lng), Number(vertex.lat)]);
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
+    coords.push([...first]);
+  }
+
+  const defaultLabel = `Custom area ${customAreaSequence}`;
+  const inputLabel = window.prompt('Name for the new area:', defaultLabel);
+  const label = (inputLabel && inputLabel.trim()) ? inputLabel.trim() : defaultLabel;
+  customAreaSequence += 1;
+  const id = generateUniqueAreaId(label);
+  const feature = {
+    type: 'Feature',
+    properties: {
+      name: label,
+      source: 'custom',
+      createdAt: new Date().toISOString()
+    },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [coords]
+    }
+  };
+  const newArea = {
+    id,
+    label,
+    fileName: `${id}.geojson`,
+    data: {
+      type: 'FeatureCollection',
+      features: [feature]
+    },
+    isCustom: true
+  };
+
+  areaDefinitions.push(newArea);
+  areaDefinitionById.set(id, newArea);
+  sortAreaDefinitions();
+  registerArea(newArea);
+  persistCustomAreas();
+  stopAreaDrawingInteraction({ keepHelp: true });
+  setActiveArea(id);
+  openAreasPanel(true);
+  setAreaDrawHelp(`Area "${label}" added and selected.`, { temporary: true, duration: 3600 });
+}
+
+function cancelAreaDrawing() {
+  if (!currentDrawingArea) {
+    resetAreaDrawHelp();
+    setAreaDrawControlsState('idle');
+    return;
+  }
+  stopAreaDrawingInteraction({ keepHelp: true });
+  setAreaDrawHelp('Drawing cancelled.', { temporary: true, duration: 2600 });
+}
+
+function deleteCustomArea(id) {
+  if (!id) return;
+  const area = areaDefinitionById.get(id);
+  if (!area || !area.isCustom) return;
+  const confirmed = window.confirm(`Delete custom area "${area.label}"?`);
+  if (!confirmed) return;
+
+  const index = areaDefinitions.findIndex(entry => entry.id === id);
+  if (index !== -1) {
+    areaDefinitions.splice(index, 1);
+  }
+  areaDefinitionById.delete(id);
+
+  const entry = areaLayers.get(id);
+  if (entry) {
+    if (entry.layer && map.hasLayer(entry.layer)) {
+      map.removeLayer(entry.layer);
+    }
+    areaLayers.delete(id);
+  }
+
+  sortAreaDefinitions();
+  persistCustomAreas();
+
+  if (activeAreaId === id) {
+    setActiveArea(null);
+  } else {
+    renderAreaList();
+  }
+
+  setAreaDrawHelp(`Area "${area.label}" deleted.`, { temporary: true, duration: 2600 });
+}
 
 function pushLoading() {
   loadingCounter += 1;
@@ -286,6 +629,22 @@ if (closeAreasBtn) {
   closeAreasBtn.addEventListener('click', () => openAreasPanel(false));
 }
 
+if (areaDrawStartBtn) {
+  areaDrawStartBtn.addEventListener('click', () => {
+    openAreasPanel(true);
+    startAreaDrawing();
+  });
+}
+if (areaDrawFinishBtn) {
+  areaDrawFinishBtn.addEventListener('click', () => finishAreaDrawing());
+}
+if (areaDrawCancelBtn) {
+  areaDrawCancelBtn.addEventListener('click', () => cancelAreaDrawing());
+}
+
+setAreaDrawControlsState('idle');
+updateAreaDrawFinishAvailability();
+
 function renderAreaList() {
   if (!areasListEl) return;
   areasListEl.textContent = '';
@@ -296,11 +655,8 @@ function renderAreaList() {
     msg.style.color = '#616e7c';
     msg.style.margin = '0';
     areasListEl.appendChild(msg);
-    if (toggleAreasBtn) toggleAreasBtn.disabled = true;
     return;
   }
-
-  if (toggleAreasBtn) toggleAreasBtn.disabled = false;
 
   const optionAll = document.createElement('label');
   optionAll.className = 'areas-option';
@@ -347,8 +703,36 @@ function renderAreaList() {
     meta.appendChild(span);
     option.appendChild(radio);
     option.appendChild(meta);
+    if (area.isCustom) {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-area-btn';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteCustomArea(area.id);
+      });
+      option.appendChild(deleteBtn);
+    }
     areasListEl.appendChild(option);
   });
+}
+
+function registerArea(area) {
+  if (!area || !area.id || !area.data) return;
+  if (areaLayers.has(area.id)) return;
+  const layer = L.geoJSON(area.data, {
+    style: () => ({ ...areaDefaultStyle }),
+    onEachFeature: (_feature, layerInstance) => {
+      layerInstance.on('click', () => {
+        setActiveArea(area.id, { focus: false });
+      });
+    }
+  });
+  layer.setStyle(areaDefaultStyle);
+  const bounds = layer.getBounds && layer.getBounds();
+  areaLayers.set(area.id, { layer, bounds });
 }
 
 // Base map: NASA GIBS daily MODIS Terra imagery, date-driven
@@ -368,24 +752,7 @@ L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imager
 map.fitBounds(PARK_BOUNDS.pad(0.5));
 
 function initializeAreas() {
-  if (!areaDefinitions.length) {
-    renderAreaList();
-    return;
-  }
-  areaDefinitions.forEach((area) => {
-    if (areaLayers.has(area.id)) return;
-    const layer = L.geoJSON(area.data, {
-      style: () => ({ ...areaDefaultStyle }),
-      onEachFeature: (_feature, layerInstance) => {
-        layerInstance.on('click', () => {
-          setActiveArea(area.id, { focus: false });
-        });
-      }
-    });
-    layer.setStyle(areaDefaultStyle);
-    const bounds = layer.getBounds();
-    areaLayers.set(area.id, { layer, bounds });
-  });
+  areaDefinitions.forEach(registerArea);
   renderAreaList();
 }
 
